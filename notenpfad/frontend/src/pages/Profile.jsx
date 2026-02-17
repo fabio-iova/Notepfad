@@ -15,7 +15,10 @@ const Profile = ({ user, onReset, onLogout }) => {
         try {
             const response = await fetch(`${API_URL}/users/student`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+                },
                 body: JSON.stringify({ username: studentUsername, password: studentPassword })
             });
 
@@ -36,7 +39,10 @@ const Profile = ({ user, onReset, onLogout }) => {
     const handleReset = async () => {
         if (!confirm("Möchtest du wirklich alle Daten zurücksetzen?")) return;
 
-        await fetch(`${API_URL}/reset`, { method: 'POST' });
+        await fetch(`${API_URL}/reset`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+        });
         alert("App wurde zurückgesetzt!");
         if (onReset) onReset();
     };

@@ -13,9 +13,12 @@ const Certificate = ({ studentId }) => {
 
     const fetchData = async () => {
         try {
+            const token = localStorage.getItem('access_token');
+            const headers = { 'Authorization': `Bearer ${token}` };
+
             const [subjRes, gradesRes] = await Promise.all([
-                fetch(`${API_URL}/subjects/`),
-                fetch(`${API_URL}/grades/?student_id=${studentId}`)
+                fetch(`${API_URL}/subjects/`, { headers }),
+                fetch(`${API_URL}/grades/?student_id=${studentId}`, { headers })
             ]);
 
             const subjects = await subjRes.json();

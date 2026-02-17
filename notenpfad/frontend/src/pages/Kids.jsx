@@ -22,7 +22,9 @@ const Kids = ({ user, onViewChild }) => {
     const fetchChildren = async () => {
         try {
             const userId = user.id || user.user_id;
-            const response = await fetch(`${API_URL}/users/${userId}/children`);
+            const response = await fetch(`${API_URL}/users/${userId}/children`, {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+            });
             if (response.ok) {
                 const data = await response.json();
                 setChildren(data);
@@ -39,7 +41,10 @@ const Kids = ({ user, onViewChild }) => {
         try {
             const response = await fetch(`${API_URL}/users/children`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+                },
                 body: JSON.stringify({
                     username: newChildUsername,
                     password: newChildPassword,
@@ -78,7 +83,10 @@ const Kids = ({ user, onViewChild }) => {
         try {
             const response = await fetch(`${API_URL}/users/${selectedChild.id}/password`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+                },
                 body: JSON.stringify({
                     password: newPasswordUpdate
                 })
@@ -108,7 +116,8 @@ const Kids = ({ user, onViewChild }) => {
         if (!childToDelete) return;
         try {
             const response = await fetch(`${API_URL}/users/children/${childToDelete.id}`, {
-                method: 'DELETE'
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
             });
 
             if (response.ok) {

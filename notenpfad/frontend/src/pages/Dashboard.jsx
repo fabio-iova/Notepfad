@@ -29,15 +29,18 @@ const Dashboard = ({ studentId, onSelectSubject, onViewHistory }) => {
 
     const fetchData = async () => {
         try {
-            const avgRes = await fetch(`${API_URL}/average/?student_id=${studentId}`);
+            const token = localStorage.getItem('access_token');
+            const headers = { 'Authorization': `Bearer ${token}` };
+
+            const avgRes = await fetch(`${API_URL}/average/?student_id=${studentId}`, { headers });
             const avgData = await avgRes.json();
             setStats(avgData); // Expecting { average, details, passed }
 
-            const subjRes = await fetch(`${API_URL}/subjects/`);
+            const subjRes = await fetch(`${API_URL}/subjects/`, { headers });
             const subjData = await subjRes.json();
             setSubjects(subjData);
 
-            const gradesRes = await fetch(`${API_URL}/grades/?student_id=${studentId}`);
+            const gradesRes = await fetch(`${API_URL}/grades/?student_id=${studentId}`, { headers });
             const gradesData = await gradesRes.json();
             const sortedGrades = gradesData.sort((a, b) => new Date(b.date) - new Date(a.date));
             setGrades(sortedGrades);
@@ -56,7 +59,10 @@ const Dashboard = ({ studentId, onSelectSubject, onViewHistory }) => {
 
         await fetch(`${API_URL}/subjects/`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+            },
             body: JSON.stringify({ name, weighting: parseFloat(weighting) })
         });
         fetchData();
@@ -65,7 +71,10 @@ const Dashboard = ({ studentId, onSelectSubject, onViewHistory }) => {
     const handleSaveGrade = async (gradeData) => {
         await fetch(`${API_URL}/grades/?student_id=${studentId}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+            },
             body: JSON.stringify({
                 ...gradeData,
                 date: new Date().toISOString().split('T')[0]
@@ -79,7 +88,8 @@ const Dashboard = ({ studentId, onSelectSubject, onViewHistory }) => {
         if (!confirm("Note wirklich löschen?")) return;
 
         await fetch(`${API_URL}/grades/${gradeId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
         });
         fetchData();
     };
@@ -88,7 +98,8 @@ const Dashboard = ({ studentId, onSelectSubject, onViewHistory }) => {
         if (!confirm("Fach wirklich löschen? Alle zugehörigen Noten werden ebenfalls gelöscht!")) return;
 
         await fetch(`${API_URL}/subjects/${subjectId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
         });
         fetchData();
     };

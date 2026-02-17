@@ -13,6 +13,7 @@ const ScanExam = () => {
             try {
                 const res = await fetch(`${API_URL}/analyze-exam`, {
                     method: 'POST',
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` },
                 });
                 const data = await res.json();
                 setResult(data);

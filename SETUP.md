@@ -97,7 +97,7 @@ If the database is empty, the system will auto-generate these default users on s
 - **Sole (Student)**
     - Username: `sole`
     - Password: `****`
-    - *Standard student view.*
+    - *Standard student view.* 
 
 ## Troubleshooting
 

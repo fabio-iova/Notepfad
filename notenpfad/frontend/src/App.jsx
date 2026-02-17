@@ -28,6 +28,9 @@ function App() {
   const handleLogin = (userData) => {
     setUser(userData);
     localStorage.setItem('user', JSON.stringify(userData));
+    if (userData.access_token) {
+      localStorage.setItem('access_token', userData.access_token);
+    }
     setView('dashboard');
   };
 
@@ -35,6 +38,7 @@ function App() {
     setUser(null);
     setViewingChild(null);
     localStorage.removeItem('user');
+    localStorage.removeItem('access_token');
     setView('dashboard');
   };
 
@@ -63,7 +67,7 @@ function App() {
       case 'history': return <GradeHistory studentId={currentStudentId} onBack={() => setView('dashboard')} />;
       case 'simulator': return <Simulator studentId={currentStudentId} />;
       case 'scan': return <ScanExam />;
-      case 'chat': return <ChatBot />;
+      case 'chat': return <ChatBot studentId={currentStudentId} />;
       case 'certificate': return <Certificate studentId={currentStudentId} />;
       case 'profile': return <Profile user={user} onReset={() => setView('dashboard')} onLogout={handleLogout} />;
       case 'kids': return <Kids user={user} onViewChild={handleViewChild} />;

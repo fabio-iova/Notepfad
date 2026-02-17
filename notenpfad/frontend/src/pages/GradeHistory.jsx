@@ -14,9 +14,12 @@ const GradeHistory = ({ studentId, onBack }) => {
 
     const fetchData = async () => {
         try {
+            const token = localStorage.getItem('access_token');
+            const headers = { 'Authorization': `Bearer ${token}` };
+
             const [gradesRes, subjRes] = await Promise.all([
-                fetch(`${API_URL}/grades/?student_id=${studentId}`),
-                fetch(`${API_URL}/subjects/`)
+                fetch(`${API_URL}/grades/?student_id=${studentId}`, { headers }),
+                fetch(`${API_URL}/subjects/`, { headers })
             ]);
 
             const gradesData = await gradesRes.json();
@@ -38,7 +41,8 @@ const GradeHistory = ({ studentId, onBack }) => {
         if (!confirm("Note wirklich löschen?")) return;
 
         await fetch(`${API_URL}/grades/${gradeId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
         });
         fetchData();
     };

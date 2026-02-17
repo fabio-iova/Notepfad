@@ -13,7 +13,9 @@ const SubjectDetail = ({ studentId, subject, onBack }) => {
     }, [subject.id, studentId]);
 
     const fetchTopics = async () => {
-        const res = await fetch(`${API_URL}/subjects/${subject.id}/topics`);
+        const res = await fetch(`${API_URL}/subjects/${subject.id}/topics`, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+        });
         const data = await res.json();
         setTopics(data);
     };
@@ -21,7 +23,9 @@ const SubjectDetail = ({ studentId, subject, onBack }) => {
     const fetchGrades = async () => {
         // Fetch all grades and filter (inefficient but simple for demo)
         // Or adding a specific endpoint would be better, but sticking to existing pattern
-        const res = await fetch(`${API_URL}/grades/?student_id=${studentId}`);
+        const res = await fetch(`${API_URL}/grades/?student_id=${studentId}`, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+        });
         const data = await res.json();
         setSubjectGrades(data.filter(g => g.subject_id === subject.id));
     };
@@ -30,7 +34,10 @@ const SubjectDetail = ({ studentId, subject, onBack }) => {
         if (!newTopic.trim()) return;
         await fetch(`${API_URL}/topics/`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+            },
             body: JSON.stringify({ name: newTopic, subject_id: subject.id, is_completed: false })
         });
         setNewTopic('');
@@ -39,7 +46,8 @@ const SubjectDetail = ({ studentId, subject, onBack }) => {
 
     const handleToggleTopic = async (topic) => {
         await fetch(`${API_URL}/topics/${topic.id}/toggle`, {
-            method: 'PUT'
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
         });
         fetchTopics();
     };

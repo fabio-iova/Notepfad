@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 import { API_BASE_URL as API_URL } from '../config';
 
-const ChatBot = () => {
+const ChatBot = ({ studentId }) => {
     const [messages, setMessages] = useState([
         { sender: 'bot', text: 'Hallo! Ich bin dein Lern-Coach. Wie kann ich dir heute helfen? 🤖' }
     ]);
@@ -25,10 +25,17 @@ const ChatBot = () => {
         setIsLoading(true);
 
         try {
+            const token = localStorage.getItem('access_token');
             const res = await fetch(`${API_URL}/chat`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: input })
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    message: input,
+                    student_id: studentId
+                })
             });
             const data = await res.json();
 
