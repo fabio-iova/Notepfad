@@ -67,7 +67,7 @@ function App() {
       case 'history': return <GradeHistory studentId={currentStudentId} onBack={() => setView('dashboard')} />;
       case 'simulator': return <Simulator studentId={currentStudentId} />;
       case 'scan': return <ScanExam />;
-      case 'chat': return <ChatBot studentId={currentStudentId} />;
+      case 'chat': return <ChatBot studentId={currentStudentId} userRole={user?.role} />;
       case 'certificate': return <Certificate studentId={currentStudentId} />;
       case 'profile': return <Profile user={user} onReset={() => setView('dashboard')} onLogout={handleLogout} />;
       case 'kids': return <Kids user={user} onViewChild={handleViewChild} />;

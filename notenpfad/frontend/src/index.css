@@ -322,3 +322,21 @@ p {
   margin-left: 0.5rem;
   text-decoration: underline;
 }
+
+/* Chat Styles - Force white text in user bubbles including markdown elements */
+.chat-bubble-user, 
+.chat-bubble-user * {
+  color: white !important;
+}
+
+.chat-bubble-user p {
+  margin-bottom: 0.5rem;
+}
+
+.chat-bubble-user p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-bubble-bot p {
+  margin-bottom: 0.5rem;
+}

@@ -1,10 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-
+import ReactMarkdown from 'react-markdown';
 import { API_BASE_URL as API_URL } from '../config';
 
-const ChatBot = ({ studentId }) => {
+const ChatBot = ({ studentId, userRole }) => {
+    const isParent = userRole === 'parent';
+    const initMsg = isParent
+        ? 'Willkommen! Ich helfe Ihnen, die schulische Entwicklung Ihres Kindes zu verstehen. 🤝'
+        : 'Hallo! Ich bin dein Lern-Coach. Wie kann ich dir heute helfen? 🤖';
+
     const [messages, setMessages] = useState([
-        { sender: 'bot', text: 'Hallo! Ich bin dein Lern-Coach. Wie kann ich dir heute helfen? 🤖' }
+        { sender: 'bot', text: initMsg }
     ]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -15,6 +20,16 @@ const ChatBot = ({ studentId }) => {
     };
 
     useEffect(scrollToBottom, [messages]);
+
+    // Reset chat when switching context (student or role)
+    useEffect(() => {
+        const newInitMsg = userRole === 'parent'
+            ? 'Willkommen! Ich helfe Ihnen, die schulische Entwicklung Ihres Kindes zu verstehen. 🤝'
+            : 'Hallo! Ich bin dein Lern-Coach. Wie kann ich dir heute helfen? 🤖';
+
+        setMessages([{ sender: 'bot', text: newInitMsg }]);
+        setInput('');
+    }, [studentId, userRole]);
 
     const handleSend = async () => {
         if (!input.trim()) return;
@@ -55,13 +70,14 @@ const ChatBot = ({ studentId }) => {
     return (
         <div className="container animate-fade-in" style={{ paddingBottom: '90px', height: '100vh', display: 'flex', flexDirection: 'column' }}>
             <div className="card" style={{ marginBottom: '1rem' }}>
-                <h2>Lern-Coach AI 🧠</h2>
+                <h2>{isParent ? 'Lern-Begleiter für Eltern 🤝' : 'Lern-Coach AI 🧠'}</h2>
             </div>
 
             <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '1rem', paddingRight: '5px' }}>
                 {messages.map((msg, index) => (
                     <div
                         key={index}
+                        className={msg.sender === 'user' ? 'chat-bubble-user' : 'chat-bubble-bot'}
                         style={{
                             alignSelf: msg.sender === 'user' ? 'flex-end' : 'flex-start',
                             background: msg.sender === 'user' ? 'var(--color-primary)' : 'white',
@@ -74,7 +90,9 @@ const ChatBot = ({ studentId }) => {
                             boxShadow: 'var(--shadow-sm)'
                         }}
                     >
-                        {msg.text}
+                        <ReactMarkdown>
+                            {msg.text}
+                        </ReactMarkdown>
                     </div>
                 ))}
                 {isLoading && <div style={{ alignSelf: 'flex-start', color: '#888', fontStyle: 'italic' }}>Schreibt...</div>}

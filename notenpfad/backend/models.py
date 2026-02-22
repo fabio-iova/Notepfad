@@ -1,6 +1,7 @@
-from sqlalchemy import Column, Integer, String, Float, Date, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Date, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from database import Base
+import datetime
 
 class Student(Base):
     __tablename__ = "students"
@@ -17,8 +18,9 @@ class Subject(Base):
     __tablename__ = "subjects"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)
+    name = Column(String, index=True)
     weighting = Column(Float, default=1.0)
+    owner_id = Column(Integer, ForeignKey("users.id")) # Scoped to a user (parent)
 
     grades = relationship("Grade", back_populates="subject")
     topics = relationship("Topic", back_populates="subject")
@@ -54,6 +56,7 @@ class User(Base):
     password_hash = Column(String)
     role = Column(String, default="parent") # parent, student
     parent_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     children = relationship("User", back_populates="parent", remote_side=[id])
     parent = relationship("User", back_populates="children", remote_side=[parent_id])

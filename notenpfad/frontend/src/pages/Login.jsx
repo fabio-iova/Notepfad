@@ -59,6 +59,25 @@ const Login = ({ onLogin }) => {
         }
     };
 
+    const handleDemoLogin = async () => {
+        try {
+            const response = await fetch(`${API_BASE_URL}/guest-login`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.detail || 'Demo login failed');
+            }
+            onLogin(data);
+        } catch (err) {
+            setError('Demo Mode unavailable: ' + err.message);
+        }
+    };
+
     return (
         <div className="login-container">
             <div className="login-card">
@@ -119,6 +138,18 @@ const Login = ({ onLogin }) => {
                         {isRegistering ? 'Login' : 'Create Account'}
                     </button>
                 </p>
+
+                <div style={{ marginTop: '20px', borderTop: '1px solid #333', paddingTop: '15px' }}>
+                    <p style={{ fontSize: '0.9rem', color: '#888' }}>Just want to look around?</p>
+                    <button
+                        type="button"
+                        className="secondary-btn"
+                        onClick={handleDemoLogin}
+                        style={{ width: '100%', padding: '10px', marginTop: '5px', backgroundColor: '#333', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                    >
+                        Start Demo Mode (No Account)
+                    </button>
+                </div>
             </div>
         </div>
     );

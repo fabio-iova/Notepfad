@@ -1,30 +1,40 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
-from datetime import date
-from passlib.context import CryptContext
+from datetime import date, datetime, timedelta
+import bcrypt
 import models, database
 import os
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from jose import JWTError, jwt
-from datetime import datetime, timedelta
+import jwt
+from jwt.exceptions import InvalidTokenError
 import openai
 
 models.Base.metadata.create_all(bind=database.engine)
 
 
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
+import random
+import string
+import secrets
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+limiter = Limiter(key_func=get_remote_address)
+
 # JWT Configuration
-SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-key-change-me") # In production, use a secure key!
+SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_urlsafe(32)) # Random secure fallback
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 24 hours
 
 app = FastAPI(title="Notenpfad API")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -42,11 +52,17 @@ def get_db():
     finally:
         db.close()
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+def verify_password(plain_password: str, hashed_password: str):
+    if isinstance(hashed_password, str):
+        hashed_password = hashed_password.encode('utf-8')
+    if isinstance(plain_password, str):
+        plain_password = plain_password.encode('utf-8')
+    return bcrypt.checkpw(plain_password, hashed_password)
 
-def get_password_hash(password):
-    return pwd_context.hash(password)
+def get_password_hash(password: str):
+    if isinstance(password, str):
+        password = password.encode('utf-8')
+    return bcrypt.hashpw(password, bcrypt.gensalt()).decode('utf-8')
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -70,7 +86,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception
-    except JWTError:
+    except InvalidTokenError:
         raise credentials_exception
     
     user = db.query(models.User).filter(models.User.username == username).first()
@@ -79,10 +95,15 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     return user
 
 # --- Pydantic Schemas ---
+
+# Basic regex for names/text to prevent HTML/Script tags
+# Allows letters (all languages), numbers, spaces, and basic punctuation (-_.,!?)
+SAFE_TEXT_REGEX = r'^[\w\s\-\.\,\!\?üöäÜÖÄéèêâàç]+$'
+
 class GradeBase(BaseModel):
-    value: float
+    value: float = Field(ge=1.0, le=6.0, description="Grade between 1.0 and 6.0")
     subject_id: int
-    type: str = "Exam"
+    type: str = Field("Exam", pattern=SAFE_TEXT_REGEX, max_length=50)
     date: date
 
 class GradeCreate(GradeBase):
@@ -95,23 +116,23 @@ class Grade(GradeBase):
         orm_mode = True
 
 class UserBase(BaseModel):
-    username: str
+    username: str = Field(..., pattern=r'^[a-zA-Z0-9_\-\.]+$', min_length=3, max_length=50, description="Alphanumeric username")
 
 class UserCreate(UserBase):
-    password: str
+    password: str = Field(..., min_length=4)
 
 class UserStudentCreate(UserBase):
-    password: str
+    password: str = Field(..., min_length=4)
 
 class UserLogin(UserBase):
     password: str
 
 class UserPasswordUpdate(BaseModel):
-    password: str
+    password: str = Field(..., min_length=4)
 
 class ChildCreate(UserBase):
-    password: str
-    name: str
+    password: str = Field(..., min_length=4)
+    name: str = Field(..., pattern=SAFE_TEXT_REGEX, min_length=2, max_length=100)
     parent_id: int
 
 class UserOut(UserBase):
@@ -132,11 +153,11 @@ class StudentOut(BaseModel):
     id: int
     name: str
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class SubjectBase(BaseModel):
-    name: str
-    weighting: float = 1.0
+    name: str = Field(..., pattern=SAFE_TEXT_REGEX, min_length=2, max_length=100)
+    weighting: float = Field(1.0, ge=0.0, le=10.0)
 
 class SubjectCreate(SubjectBase):
     pass
@@ -177,7 +198,9 @@ def startup_event():
         admin = db.query(models.User).filter(models.User.username == "admin").first()
         if not admin:
             print("Creating default admin user...", flush=True)
-            hashed_password = get_password_hash(os.getenv("ADMIN_PASSWORD", "1234"))
+            admin_pw = os.getenv("ADMIN_PASSWORD", secrets.token_urlsafe(8))
+            print(f"Admin Password is: {admin_pw} (SAVE THIS!)", flush=True)
+            hashed_password = get_password_hash(admin_pw)
             admin = models.User(username="admin", password_hash=hashed_password, role="parent")
             db.add(admin)
             db.commit()
@@ -190,7 +213,9 @@ def startup_event():
         sole = db.query(models.User).filter(models.User.username == "sole").first()
         if not sole:
             print("Creating default student user: sole...", flush=True)
-            hashed_sole_pw = get_password_hash(os.getenv("STUDENT_PASSWORD", "sun26"))
+            sole_pw = os.getenv("STUDENT_PASSWORD", secrets.token_urlsafe(8))
+            print(f"Student 'sole' Password is: {sole_pw} (SAVE THIS!)", flush=True)
+            hashed_sole_pw = get_password_hash(sole_pw)
             sole = models.User(username="sole", password_hash=hashed_sole_pw, role="student", parent_id=admin.id)
             db.add(sole)
             db.commit()
@@ -218,10 +243,18 @@ def startup_event():
 
         for sub_name, topics in default_data.items():
             # Ensure Subject
-            subject = db.query(models.Subject).filter(models.Subject.name == sub_name).first()
+            # Check if this subject exists for global admin/template usage? 
+            # Or just check if *any* exists? 
+            # For startup seeding, let's assign them to the admin user we just fetched/created.
+            
+            subject = db.query(models.Subject).filter(
+                models.Subject.name == sub_name, 
+                models.Subject.owner_id == admin.id
+            ).first()
+            
             if not subject:
-                print(f"Creating default subject: {sub_name}...", flush=True)
-                subject = models.Subject(name=sub_name, weighting=1.0)
+                print(f"Creating default subject for admin: {sub_name}...", flush=True)
+                subject = models.Subject(name=sub_name, weighting=1.0, owner_id=admin.id)
                 db.add(subject)
                 db.commit()
                 db.refresh(subject)
@@ -249,8 +282,10 @@ def startup_event():
         db.close()
 
 @app.get("/debug/db-status")
-def debug_db_status(db: Session = Depends(get_db)):
+def debug_db_status(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     """Debug endpoint to check DB content state"""
+    if current_user.username != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
     try:
         user_count = db.query(models.User).count()
         student_count = db.query(models.Student).count()
@@ -281,7 +316,8 @@ def debug_db_status(db: Session = Depends(get_db)):
         return {"status": "error", "detail": str(e)}
 
 @app.post("/register", response_model=UserOut)
-def register(user: UserCreate, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def register(request: Request, user: UserCreate, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.username == user.username).first()
     if db_user:
         raise HTTPException(status_code=400, detail="Username already registered")
@@ -294,7 +330,8 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     return new_user
 
 @app.post("/users/student", response_model=UserOut)
-def create_student(user: UserStudentCreate, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def create_student(request: Request, user: UserStudentCreate, db: Session = Depends(get_db)):
     # In a real app, we'd check if current_user.role == 'parent'
     # For now, we assume access to this endpoint implies permission (simpler)
     db_user = db.query(models.User).filter(models.User.username == user.username).first()
@@ -309,7 +346,8 @@ def create_student(user: UserStudentCreate, db: Session = Depends(get_db)):
     return new_user
 
 @app.post("/login", response_model=Token)
-def login(user: UserLogin, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def login(request: Request, user: UserLogin, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.username == user.username).first()
     if not db_user or not verify_password(user.password, db_user.password_hash):
         raise HTTPException(status_code=401, detail="Incorrect username or password")
@@ -335,8 +373,140 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
         "student_id": student_id
     }
 
+def cleanup_old_guests():
+    """Background task to delete guest accounts older than 24 hours."""
+    db = database.SessionLocal()
+    try:
+        cutoff = datetime.utcnow() - timedelta(hours=24)
+        print(f"--- RUNNING GUEST CLEANUP: Deleting guests older than {cutoff} ---")
+        
+        # Find old guest parents
+        old_guests = db.query(models.User).filter(
+            models.User.username.like("guest_%"),
+            models.User.created_at < cutoff
+        ).all()
+        
+        for guest in old_guests:
+            print(f"Cleaning up guest: {guest.username} (Created: {guest.created_at})")
+            # 1. Delete associated subjects, topics, and grades
+            subjects = db.query(models.Subject).filter(models.Subject.owner_id == guest.id).all()
+            for subject in subjects:
+                db.query(models.Topic).filter(models.Topic.subject_id == subject.id).delete()
+                db.query(models.Grade).filter(models.Grade.subject_id == subject.id).delete()
+                db.delete(subject)
+            
+            # 2. Delete children and their student profiles/grades
+            children = db.query(models.User).filter(models.User.parent_id == guest.id).all()
+            for child in children:
+                student = db.query(models.Student).filter(models.Student.user_id == child.id).first()
+                if student:
+                    db.query(models.Grade).filter(models.Grade.student_id == student.id).delete()
+                    db.delete(student)
+                db.delete(child)
+            
+            # 3. Delete the guest parent
+            db.delete(guest)
+            
+        db.commit()
+    except Exception as e:
+        print(f"Error during guest cleanup: {e}")
+    finally:
+        db.close()
+
+
+@app.post("/guest-login", response_model=Token)
+@limiter.limit("3/minute")
+def guest_login(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """
+    Creates a temporary guest account with seeded data and logs in immediately.
+    """
+    # Trigger cleanup of old accounts in the background
+    background_tasks.add_task(cleanup_old_guests)
+    
+    # 1. Create unique guest user
+    suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+    username = f"guest_{suffix}"
+    password = secrets.token_urlsafe(8)
+    hashed_password = get_password_hash(password)
+    
+    guest_parent = models.User(username=username, password_hash=hashed_password, role="parent")
+    db.add(guest_parent)
+    db.commit()
+    db.refresh(guest_parent)
+    
+    # 2. Create generic child
+    child_names = ["Alex", "Leo", "Mia", "Zoé", "Noah", "Luca"]
+    child_name = random.choice(child_names) 
+    child_username = f"student_{suffix}"
+    child_pw = get_password_hash("1234") # Simple pw for them if they need it
+    
+    guest_child = models.User(username=child_username, password_hash=child_pw, role="student", parent_id=guest_parent.id)
+    db.add(guest_child)
+    db.commit()
+    db.refresh(guest_child)
+    
+    student_profile = models.Student(name=child_name, target_school="Gymnasium", user_id=guest_child.id)
+    db.add(student_profile)
+    db.commit()
+    db.refresh(student_profile)
+    
+    # 3. Seed Subjects & Grades (Isolated to this parent)
+    # Define Subjects
+    subjects_data = {
+        "Mathematik": {"weight": 1.0, "topics": ["Grundoperationen", "Geometrie", "Textaufgaben"]},
+        "Deutsch": {"weight": 1.0, "topics": ["Grammatik", "Rechtschreibung", "Textverständnis"]}
+    }
+    
+    for sub_name, details in subjects_data.items():
+        # Create Subject linked to Parent
+        subject = models.Subject(name=sub_name, weighting=details["weight"], owner_id=guest_parent.id)
+        db.add(subject)
+        db.commit()
+        db.refresh(subject)
+        
+        # Create Topics (Global topics linked to subject, status is currently global per subject id)
+        for topic_name in details["topics"]:
+             # Random completion
+             is_done = random.choice([True, False])
+             db.add(models.Topic(name=topic_name, subject_id=subject.id, is_completed=1 if is_done else 0))
+        
+        # Create Random Grades
+        # Add a few grades
+        for _ in range(random.randint(2, 4)):
+            val = round(random.uniform(3.5, 6.0), 1)
+            # 50% chance of 'Prüfung' or 'Vornote'
+            g_type = random.choice(["Prüfung", "Vornote", "Test"])
+            
+            grade = models.Grade(
+                value=val,
+                subject_id=subject.id,
+                student_id=student_profile.id,
+                type=g_type,
+                date=date.today()
+            )
+            db.add(grade)
+            
+    db.commit()
+    
+    # 4. Generate Token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": guest_parent.username, "role": guest_parent.role, "id": guest_parent.id},
+        expires_delta=access_token_expires
+    )
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user_id": guest_parent.id,
+        "username": guest_parent.username,
+        "role": guest_parent.role,
+        "student_id": None 
+    }
+
 @app.post("/users/children", response_model=UserOut)
-def create_child(child: ChildCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+@limiter.limit("10/minute")
+def create_child(request: Request, child: ChildCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     # Check parent exists (using current_user for security)
     if current_user.id != child.parent_id and current_user.role != 'admin':
          # Allow admins or the parent themselves
@@ -417,7 +587,12 @@ def update_password(user_id: int, user_update: UserPasswordUpdate, db: Session =
 
 @app.post("/subjects/", response_model=Subject)
 def create_subject(subject: SubjectCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    db_subject = models.Subject(name=subject.name, weighting=subject.weighting)
+    # Scope to current user (if parent) or parent (if student)
+    owner_id = current_user.id
+    if current_user.role == "student" and current_user.parent_id:
+        owner_id = current_user.parent_id
+        
+    db_subject = models.Subject(name=subject.name, weighting=subject.weighting, owner_id=owner_id)
     db.add(db_subject)
     db.commit()
     db.refresh(db_subject)
@@ -425,7 +600,12 @@ def create_subject(subject: SubjectCreate, db: Session = Depends(get_db), curren
 
 @app.get("/subjects/", response_model=List[Subject])
 def read_subjects(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    subjects = db.query(models.Subject).offset(skip).limit(limit).all()
+    # Filter by owner_id
+    owner_id = current_user.id
+    if current_user.role == "student" and current_user.parent_id:
+        owner_id = current_user.parent_id
+        
+    subjects = db.query(models.Subject).filter(models.Subject.owner_id == owner_id).offset(skip).limit(limit).all()
     return subjects
 
 @app.delete("/subjects/{subject_id}")
@@ -433,7 +613,15 @@ def delete_subject(subject_id: int, db: Session = Depends(get_db), current_user:
     subject = db.query(models.Subject).filter(models.Subject.id == subject_id).first()
     if not subject:
         raise HTTPException(status_code=404, detail="Subject not found")
+        
+    # Check ownership
+    owner_id = current_user.id
+    if current_user.role == "student" and current_user.parent_id:
+        owner_id = current_user.parent_id
     
+    if subject.owner_id != owner_id and current_user.role != 'admin': # Admin override
+         raise HTTPException(status_code=403, detail="Not authorized to delete this subject")
+
     # Manually delete grades associated with this subject (safeguard for SQLite/no-cascade)
     db.query(models.Grade).filter(models.Grade.subject_id == subject_id).delete()
     
@@ -463,8 +651,19 @@ def create_grade(grade: GradeCreate, student_id: int = 1, db: Session = Depends(
          child_user = db.query(models.User).filter(models.User.id == student.user_id).first()
          if not child_user or child_user.parent_id != current_user.id:
               raise HTTPException(status_code=403, detail="Not authorized to add grades for this student")
+
+    # Validate that the subject exists and belongs to the correct owner
+    subject = db.query(models.Subject).filter(models.Subject.id == grade.subject_id).first()
+    if not subject:
+         raise HTTPException(status_code=404, detail="Subject not found")
+         
+    owner_id = current_user.id
+    if current_user.role == "student" and current_user.parent_id:
+        owner_id = current_user.parent_id
+    if subject.owner_id != owner_id and current_user.role != 'admin':
+         raise HTTPException(status_code=403, detail="Not authorized to use this subject")
     
-    db_grade = models.Grade(**grade.dict(), student_id=student_id)
+    db_grade = models.Grade(**grade.model_dump(), student_id=student_id) if hasattr(grade, "model_dump") else models.Grade(**grade.dict(), student_id=student_id)
     db.add(db_grade)
     db.commit()
     db.refresh(db_grade)
@@ -498,6 +697,16 @@ def delete_grade(grade_id: int, db: Session = Depends(get_db), current_user: mod
     if not grade:
         raise HTTPException(status_code=404, detail="Grade not found")
     
+    student = db.query(models.Student).filter(models.Student.id == grade.student_id).first()
+    if student:
+        if current_user.role == "student":
+            if current_user.student_profile and current_user.student_profile.id != student.id:
+                raise HTTPException(status_code=403, detail="Cannot delete grades for other students")
+        if current_user.role == "parent":
+            child_user = db.query(models.User).filter(models.User.id == student.user_id).first()
+            if not child_user or child_user.parent_id != current_user.id:
+                raise HTTPException(status_code=403, detail="Not authorized to delete grades for this student")
+                
     db.delete(grade)
     db.commit()
     return {"message": "Grade deleted"}
@@ -605,7 +814,7 @@ def calculate_average(student_id: int = 1, db: Session = Depends(get_db), curren
     }
 
 @app.post("/analyze-exam")
-def analyze_exam():
+def analyze_exam(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     # Mock Response
     return {
         "grade": 5.0,
@@ -616,7 +825,7 @@ def analyze_exam():
 # --- Topic Endpoints ---
 
 class TopicBase(BaseModel):
-    name: str
+    name: str = Field(..., pattern=SAFE_TEXT_REGEX, min_length=2, max_length=100)
     is_completed: bool = False
 
 class TopicCreate(TopicBase):
@@ -630,6 +839,16 @@ class Topic(TopicBase):
 
 @app.post("/topics/", response_model=Topic)
 def create_topic(topic: TopicCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    subject = db.query(models.Subject).filter(models.Subject.id == topic.subject_id).first()
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+        
+    owner_id = current_user.id
+    if current_user.role == "student" and current_user.parent_id:
+        owner_id = current_user.parent_id
+    if subject.owner_id != owner_id and current_user.role != 'admin':
+        raise HTTPException(status_code=403, detail="Not authorized to add topics to this subject")
+
     db_topic = models.Topic(name=topic.name, is_completed=topic.is_completed, subject_id=topic.subject_id)
     db.add(db_topic)
     db.commit()
@@ -642,13 +861,31 @@ def toggle_topic(topic_id: int, db: Session = Depends(get_db), current_user: mod
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
     
+    subject = db.query(models.Subject).filter(models.Subject.id == topic.subject_id).first()
+    if subject:
+        owner_id = current_user.id
+        if current_user.role == "student" and current_user.parent_id:
+            owner_id = current_user.parent_id
+        if subject.owner_id != owner_id and current_user.role != 'admin':
+            raise HTTPException(status_code=403, detail="Not authorized to toggle this topic")
+            
     topic.is_completed = not topic.is_completed
     db.commit()
     db.refresh(topic)
     return topic
 
 @app.get("/subjects/{subject_id}/topics", response_model=List[Topic])
-def read_topics(subject_id: int, db: Session = Depends(get_db)):
+def read_topics(subject_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    subject = db.query(models.Subject).filter(models.Subject.id == subject_id).first()
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    
+    owner_id = current_user.id
+    if current_user.role == "student" and current_user.parent_id:
+        owner_id = current_user.parent_id
+    if subject.owner_id != owner_id and current_user.role != 'admin':
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
     topics = db.query(models.Topic).filter(models.Topic.subject_id == subject_id).all()
     return topics
 
@@ -787,7 +1024,33 @@ def chat_bot(request: ChatRequest, db: Session = Depends(get_db), current_user: 
 
     # 2. Build Context
     context = ""
-    if target_student_id:
+    
+    if current_user.role == "parent":
+        # Parent Context: Fetch ALL children
+        children_users = db.query(models.User).filter(models.User.parent_id == current_user.id).all()
+        
+        if not children_users:
+            context = "No children linked to this parent account."
+        else:
+            context_parts = []
+            for child_user in children_users:
+                # Get student profile for this child
+                student_profile = db.query(models.Student).filter(models.Student.user_id == child_user.id).first()
+                if student_profile:
+                    child_context = get_student_context(student_profile.id, db)
+                    # Add a header for the child
+                    context_parts.append(f"--- Child: {student_profile.name} (ID: {student_profile.id}) ---\n{child_context}")
+            
+            context = "Here is the data for your children:\n\n" + "\n\n".join(context_parts)
+            
+            if target_student_id:
+                # If a specific child was selected, mention it
+                selected_student = db.query(models.Student).filter(models.Student.id == target_student_id).first()
+                if selected_student:
+                    context = f"CURRENTLY VIEWING: {selected_student.name}\n\n" + context
+    
+    elif target_student_id:
+        # Student Context (Single)
         context = get_student_context(target_student_id, db)
     
     # 3. Call OpenAI
@@ -797,22 +1060,67 @@ def chat_bot(request: ChatRequest, db: Session = Depends(get_db), current_user: 
 
     client = openai.OpenAI(api_key=api_key)
     
-    system_prompt = f"""You are a helpful, encouraging learning coach for a student.
-    Your goal is to help them learn, reflect on their grades, and prepare for exams.
+    system_prompt = ""
     
-    Current Student Context:
-    {context}
-    
-    Instructions:
-    - Be friendly and age-appropriate (for school kids).
-    - Use the grades context to give specific advice (e.g. "Math looks great, but let's practice German").
-    - Do NOT give direct answers to homework questions, but guide them.
-    - If the user is a parent (checked via role if passed, but assume student context for now), give insights.
+    grading_system_context = """
+    IMPORTANT - GRADING SYSTEM (Swiss Standard):
+    - Scale: 1.0 to 6.0
+    - 6.0 = Excellent / Best possible grade
+    - 5.0 = Good
+    - 4.0 = Sufficient (Pass)
+    - Below 4.0 = Insufficient (Fail)
+    - 1.0 = Worst possible grade
+    PLEASE INTERPRET ALL GRADES ACCORDING TO THIS SYSTEM. A 5.5 is amazing, a 2.5 is very bad.
     """
+
+    formatting_instruction = "\nIMPORTANT: Format your response using Markdown. Use **bold** for emphasis, lists for readability, and headers (###) for sections."
+
+    gym_exam_context = """
+    GOAL: Prepare the student for the 'Gymnasiumsaufnahmeprüfung' (Swiss Gymnasium Entrance Exam).
+    - Focus on core subjects: Mathematics and German (and potentially French/English).
+    - When asked for exercises, suggest tasks typical for Swiss Gymi exams (e.g., text analysis in German, geometry/word problems in Math).
+    - Motivate the student for this specific high-stakes goal.
+    """
+
+    if current_user.role == "parent":
+        system_prompt = f"""You are a helpful education advisor for a parent.
+        Your goal is to help the parent understand their child's progress, interpret grades, and suggest supportive actions to help the child pass the Gymnasium Entrance Exam.
+        
+        {grading_system_context}
+        {gym_exam_context}
+        {formatting_instruction}
+        
+        Child's Current Context:
+        {context}
+        
+        Instructions:
+        - Address the user as the parent.
+        - Be professional but empathetic.
+        - Analyze the grades objectively (e.g., "The math grades have improved...").
+        - Suggest specific topics the parent can help the child review based on the topic status.
+        - Do not address the child directly; address the parent about the child.
+        """
+    else:
+        # Default to student "Lern-Coach"
+        system_prompt = f"""You are a helpful, encouraging learning coach for a student.
+        Your goal is to help them learn, reflect on their grades, and prepare for the Gymnasium Entrance Exam.
+        
+        {grading_system_context}
+        {gym_exam_context}
+        {formatting_instruction}
+        
+        Current Student Context:
+        {context}
+        
+        Instructions:
+        - Be friendly and age-appropriate (for school kids).
+        - Use the grades context to give specific advice (e.g. "Math looks great, but let's practice German").
+        - Do NOT give direct answers to homework questions, but guide them.
+        """
     
     try:
         completion = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": request.message}
@@ -826,15 +1134,34 @@ def chat_bot(request: ChatRequest, db: Session = Depends(get_db), current_user: 
 
 @app.post("/reset")
 def reset_demo(student_id: int = 1, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    # Only admin/parent can reset? For now, open but authenticated
+    # Validate ownership of the student
+    student = db.query(models.Student).filter(models.Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+        
+    if current_user.role == "student":
+        if current_user.student_profile and current_user.student_profile.id != student_id:
+             raise HTTPException(status_code=403, detail="Cannot reset data for other students")
     
+    if current_user.role == "parent":
+         child_user = db.query(models.User).filter(models.User.id == student.user_id).first()
+         if not child_user or child_user.parent_id != current_user.id:
+              raise HTTPException(status_code=403, detail="Not authorized to reset data for this student")
+              
+    owner_id = current_user.id
+    if current_user.role == "student" and current_user.parent_id:
+        owner_id = current_user.parent_id
+        
     # Delete all grades for student
     db.query(models.Grade).filter(models.Grade.student_id == student_id).delete()
     
-    # Reset all topics to not completed
-    topics = db.query(models.Topic).all()
-    for t in topics:
-        t.is_completed = 0
+    # Reset all topics to not completed ONLY for subjects owned by this user/parent
+    subjects = db.query(models.Subject).filter(models.Subject.owner_id == owner_id).all()
+    subject_ids = [s.id for s in subjects]
+    if subject_ids:
+        topics = db.query(models.Topic).filter(models.Topic.subject_id.in_(subject_ids)).all()
+        for t in topics:
+            t.is_completed = 0
     
     db.commit()
     return {"message": "Demo reset successful"}

@@ -22,5 +22,6 @@ urllib3==2.6.3
 uvicorn==0.39.0
 gunicorn
 psycopg2-binary
-python-jose[cryptography]
+PyJWT==2.10.1
 openai
+slowapi==0.1.9
